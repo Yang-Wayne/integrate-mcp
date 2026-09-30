@@ -3,6 +3,36 @@ document.addEventListener("DOMContentLoaded", () => {
   const activitySelect = document.getElementById("activity");
   const signupForm = document.getElementById("signup-form");
   const messageDiv = document.getElementById("message");
+  const signupContainer = document.getElementById("signup-container");
+  const loginToggle = document.getElementById("login-toggle");
+  const logoutButton = document.getElementById("logout-button");
+  const loginForm = document.getElementById("login-form");
+  const authMessage = document.getElementById("auth-message");
+  let teacherAuthorization = null;
+
+  function setTeacherMode(isTeacher) {
+    signupContainer.classList.toggle("hidden", !isTeacher);
+    loginToggle.classList.toggle("hidden", isTeacher);
+    logoutButton.classList.toggle("hidden", !isTeacher);
+    if (!isTeacher) {
+      loginForm.classList.add("hidden");
+    }
+  }
+
+  function createBasicAuthorization(username, password) {
+    const encodedCredentials = new TextEncoder().encode(`${username}:${password}`);
+    const binaryCredentials = Array.from(encodedCredentials, (byte) =>
+      String.fromCharCode(byte)
+    ).join("");
+    return `Basic ${btoa(binaryCredentials)}`;
+  }
+
+  function showAuthMessage(message, isError = true) {
+    authMessage.textContent = message;
+    authMessage.classList.toggle("error", isError);
+    authMessage.classList.toggle("success", !isError);
+    authMessage.classList.remove("hidden");
+  }
 
   // Function to fetch activities from API
   async function fetchActivities() {
@@ -12,6 +42,9 @@ document.addEventListener("DOMContentLoaded", () => {
 
       // Clear loading message
       activitiesList.innerHTML = "";
+      while (activitySelect.options.length > 1) {
+        activitySelect.remove(1);
+      }
 
       // Populate activities list
       Object.entries(activities).forEach(([name, details]) => {
@@ -29,8 +62,11 @@ document.addEventListener("DOMContentLoaded", () => {
               <ul class="participants-list">
                 ${details.participants
                   .map(
-                    (email) =>
-                      `<li><span class="participant-email">${email}</span><button class="delete-btn" data-activity="${name}" data-email="${email}">❌</button></li>`
+                    (email) => `<li><span class="participant-email">${email}</span>${
+                      teacherAuthorization
+                        ? `<button class="delete-btn" data-activity="${name}" data-email="${email}" aria-label="Remove ${email}">Remove</button>`
+                        : ""
+                    }</li>`
                   )
                   .join("")}
               </ul>
@@ -80,6 +116,7 @@ document.addEventListener("DOMContentLoaded", () => {
         )}/unregister?email=${encodeURIComponent(email)}`,
         {
           method: "DELETE",
+          headers: { Authorization: teacherAuthorization },
         }
       );
 
@@ -92,6 +129,11 @@ document.addEventListener("DOMContentLoaded", () => {
         // Refresh activities list to show updated participants
         fetchActivities();
       } else {
+        if (response.status === 401) {
+          teacherAuthorization = null;
+          setTeacherMode(false);
+          fetchActivities();
+        }
         messageDiv.textContent = result.detail || "An error occurred";
         messageDiv.className = "error";
       }
@@ -110,6 +152,48 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
+  loginToggle.addEventListener("click", () => {
+    loginForm.classList.toggle("hidden");
+    authMessage.classList.add("hidden");
+  });
+
+  logoutButton.addEventListener("click", () => {
+    teacherAuthorization = null;
+    loginForm.reset();
+    authMessage.classList.add("hidden");
+    setTeacherMode(false);
+    fetchActivities();
+  });
+
+  loginForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const username = document.getElementById("teacher-username").value.trim();
+    const password = document.getElementById("teacher-password").value;
+    const authorization = createBasicAuthorization(username, password);
+
+    try {
+      const response = await fetch("/teacher-login", {
+        method: "POST",
+        headers: { Authorization: authorization },
+      });
+      const result = await response.json();
+
+      if (!response.ok) {
+        showAuthMessage(result.detail || "Unable to log in");
+        return;
+      }
+
+      teacherAuthorization = authorization;
+      loginForm.reset();
+      authMessage.classList.add("hidden");
+      setTeacherMode(true);
+      fetchActivities();
+    } catch (error) {
+      showAuthMessage("Failed to log in. Please try again.");
+      console.error("Error logging in:", error);
+    }
+  });
+
   // Handle form submission
   signupForm.addEventListener("submit", async (event) => {
     event.preventDefault();
@@ -124,6 +208,7 @@ document.addEventListener("DOMContentLoaded", () => {
         )}/signup?email=${encodeURIComponent(email)}`,
         {
           method: "POST",
+          headers: { Authorization: teacherAuthorization },
         }
       );
 
@@ -137,6 +222,11 @@ document.addEventListener("DOMContentLoaded", () => {
         // Refresh activities list to show updated participants
         fetchActivities();
       } else {
+        if (response.status === 401) {
+          teacherAuthorization = null;
+          setTeacherMode(false);
+          fetchActivities();
+        }
         messageDiv.textContent = result.detail || "An error occurred";
         messageDiv.className = "error";
       }
@@ -156,5 +246,6 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 
   // Initialize app
+  setTeacherMode(false);
   fetchActivities();
 });
